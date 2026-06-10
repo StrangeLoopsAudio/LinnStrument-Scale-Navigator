@@ -35,9 +35,15 @@ secondaryColorMap.set(2, 3); // 2 semitones up -> green
 secondaryColorMap.set(-1, 11); // 1 semitone down -> pink
 secondaryColorMap.set(-2, 1); // 2 semitones down -> red
 
+// State used for the contract of cell transitions, determines how to interpret note on/off messages
+const MessageState = Object.freeze({
+    NORMAL: 0,
+    EXPECT_NOTE_ON: 1,
+    EXPECT_NOTE_OFF: 2
+});
+
 class RowVoice {
     constructor() {
-        this.isPlaying = false;
         this.sourceColumn = 1; // Column that triggered the note on
         this.currentColumn = 1; // Column the user is currently pressing
         // Raw X value from MIDI, 14-bit combining MSB and LSB
@@ -63,6 +69,7 @@ var state = {
     pitchMap: [],
     voices: Array(8).fill(new RowVoice()), // Array of active voices, indexed by row
     playedNotes: new Map(), // Map of currently active pitches to the cells that represent them
+    messageState: MessageState.NORMAL
 };
 
 // Converts a tuple of (row, col) to a string key for use in maps
@@ -79,11 +86,13 @@ Max.addHandler(HANDLER_ENABLE, (v) => {
 
 Max.addHandler(HANDLER_ENABLE_X, (v) => {
     state.isXEnabled = v ? 1 : 0;
+    // CC 9        Configure User Firmware X-axis row slide, the channel specifies the row (0: disable, 1: enable)
     // CC 10       Configure User Firmware X-axis data, the channel specifies the row, default is off (0: disable, 1: enable)
     Max.post("X-axis enable: " + state.isXEnabled + "\n");
     for (var row = 0; row < 8; row++) {
         Max.outlet(HANDLER_MIDI_CHANNEL, row + 1); // Send the row number as the value to specify which row is used for X-axis sliding when enabled, send 0 to disable
-        Max.outlet(HANDLER_MIDI_CC, 10, state.isXEnabled); // Send the row number as the value to specify which row is used for X-axis sliding when enabled, send 0 to disable
+        Max.outlet(HANDLER_MIDI_CC, 9, state.isXEnabled); // Enables row slide
+        Max.outlet(HANDLER_MIDI_CC, 10, state.isXEnabled); // Enables X data
     }
 });
 
@@ -182,17 +191,23 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
     let column = args[0] - 1;
     let velocity = args[1];
     let row = args[2] - 1;
-    let mappedPitchEntry = state.pitchMap[row][column];
+    //Max.post("Note event - row: " + row + ", column: " + column +  ", velocity: " + velocity + "\n");
+    if (state.messageState == MessageState.NORMAL) {
+        let mappedPitchEntry = state.pitchMap[row][column];
 
-    Max.post("Note event - row: " + row + ", column: " + column +  ", velocity: " + velocity + "\n");
-
-    // Note on/off behavior
-    if (mappedPitchEntry.scale == state.currentScale) {
-        // TODO: fix note on/off logic
-        state.voices[row].sourceColumn = column;
-        handleNoteOnOff(row, mappedPitchEntry.pitch, velocity);
-    } else if (mappedPitchEntry.scale !== state.currentScale && velocity == 0) {
-        handleAdjacentScaleChange(mappedPitchEntry.scale);
+        // Note on/off behavior
+        if (mappedPitchEntry.scale == state.currentScale) {
+            // TODO: fix note on/off logic
+            handleNoteOnOff(row, column, velocity);
+        } else if (mappedPitchEntry.scale !== state.currentScale && velocity == 0) {
+            handleAdjacentScaleChange(mappedPitchEntry.scale);
+        }
+    } else if (state.messageState == MessageState.EXPECT_NOTE_ON) {
+        state.voices[row].currentColumn = column;
+        Max.post("Slide to column: " + column + " on row: " + row + "\n");
+        state.messageState = MessageState.EXPECT_NOTE_OFF;
+    } else if (state.messageState == MessageState.EXPECT_NOTE_OFF) {
+        state.messageState = MessageState.NORMAL;
     }
 });
 
@@ -207,40 +222,49 @@ Max.addHandler(HANDLER_MIDI_POLY_PRESSURE, (note, value, channel) => {
 });
 
 Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
-    if (state.isXEnabled && (ccNum <= 25 || (ccNum >= 32 && ccNum <= 57))) {
-        // CC 0-25                    X data,      CC Number:    Column,  Channel: Row,      Data: Global X Position MSB
-        // CC 32-57                   X data,      CC Number-32: Column,  Channel: Row,      Data: Global X Position LSB
+    if (state.isXEnabled) {
         var row = channel - 1;
-        var column = ccNum <= 25 ? ccNum : ccNum - 32;
-        state.voices[row].currentColumn = column;
-        var xPosition = state.voices[row].rawX;
-        if (ccNum <= 25) {
-            // MSB comes in second
-            xPosition = (ccValue << 7) | (xPosition & 0x7F);
-            // Calculate pitch bend around the voice's source column
-            let sourceXNorm = (state.voices[row].sourceColumn + 0.5) / state.gridWidth;
-            let curXNorm = xPosition / (state.gridWidth == 16 ? MAX_X_POSITION_16_COL : MAX_X_POSITION_25_COL);
-            // Map the X position to a pitch bend value between 0 and 127 based on distance from source column,
-            // scaled by the configured pitch bend range in octaves (where 1 octave = 7 cells of distance)
-            // First calculate the max distance in normalized X from the source column that corresponds to the configured pitch bend range in octaves
-            let maxDistanceNorm = (state.pbRangeOctaves * 7) / state.gridWidth;
-            // Then calculate the distance from the source column in normalized X
-            let distanceNorm = curXNorm - sourceXNorm;
-            // Limit the distanceNorm to the maxDistanceNorm
-            if (distanceNorm > maxDistanceNorm) {
-                distanceNorm = maxDistanceNorm;
-            } else if (distanceNorm < -maxDistanceNorm) {
-                distanceNorm = -maxDistanceNorm;
+        if (ccNum <= 25 || (ccNum >= 32 && ccNum <= 57)) {
+            // CC 0-25  CC Number:    Column,  Channel: Row,      Data: Global X Position MSB
+            // CC 32-57 CC Number-32: Column,  Channel: Row,      Data: Global X Position LSB
+            var column = ccNum <= 25 ? ccNum : ccNum - 32;
+            state.voices[row].currentColumn = column;
+            var xPosition = state.voices[row].rawX;
+            if (ccNum <= 25) {
+                // MSB comes in second
+                xPosition = (ccValue << 7) | (xPosition & 0x7F);
+                // Calculate pitch bend around the voice's source column
+                let sourceXNorm = (state.voices[row].sourceColumn + 0.5) / state.gridWidth;
+                let curXNorm = xPosition / (state.gridWidth == 16 ? MAX_X_POSITION_16_COL : MAX_X_POSITION_25_COL);
+                // Map the X position to a pitch bend value between 0 and 127 based on distance from source column,
+                // scaled by the configured pitch bend range in octaves (where 1 octave = 7 cells of distance)
+                // First calculate the max distance in normalized X from the source column that corresponds to the configured pitch bend range in octaves
+                let maxDistanceNorm = (state.pbRangeOctaves * 7) / state.gridWidth;
+                // Then calculate the distance from the source column in normalized X
+                let distanceNorm = curXNorm - sourceXNorm;
+                // Limit the distanceNorm to the maxDistanceNorm
+                if (distanceNorm > maxDistanceNorm) {
+                    distanceNorm = maxDistanceNorm;
+                } else if (distanceNorm < -maxDistanceNorm) {
+                    distanceNorm = -maxDistanceNorm;
+                }
+                // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
+                let pbValue = Math.round((distanceNorm / maxDistanceNorm) * 64) + 64;
+                state.voices[row].pitchBend = pbValue;
+                Max.post("Updated Pitch Bend for row: " + row + " -> " + pbValue + "\n");
+            } else {
+                // LSB comes in first
+                xPosition = ccValue;
             }
-            // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
-            let pbValue = Math.round((distanceNorm / maxDistanceNorm) * 64) + 64;
-            state.voices[row].pitchBend = pbValue;
-            Max.post("Updated Pitch Bend for row: " + row + " -> " + pbValue + "\n");
-        } else {
-            // LSB comes in first
-            xPosition = ccValue;
+            state.voices[row].rawX = xPosition;
+        } else if (ccNum == 119) {
+            // CC 119                                                           Channel: Row,      Data: Transitioning Column
+            //  - After CC 119 Note On    Target Cell,  Note Number: Column,    Channel: Row,  Velocity: First Slide Cell's Velocity
+            // - After CC 119 Note Off   Source Cell,  Note Number: Column,     Channel: Row,  Velocity: Slide Target Column
+            // Transitioning column, can be used to update the source column for the voice when sliding between columns
+            //Max.post("Got cell transition for row: " + row + " from column: " + (ccValue - 1) + "\n");
+            state.messageState = MessageState.EXPECT_NOTE_ON;
         }
-        state.voices[row].rawX = xPosition;
     } else if (state.isYEnabled && ccNum >= 64 && ccNum <= 89) {
         var row = channel - 1;
         var column = ccNum - 64;
@@ -254,9 +278,16 @@ Max.addHandler(HANDLER_PB_RANGE, (value) => {
     state.pbRangeOctaves = value / 12;
 });
 
-function handleNoteOnOff(row, note, velocity) {
+function handleNoteOnOff(row, column, velocity) {
+    let actualColumn = column;
+    if (state.voices[row].sourceColumn !== column && velocity == 0) {
+        // Send note off for source column instead of current one
+        actualColumn = state.voices[row].sourceColumn;
+    } else if (velocity > 0) {
+        state.voices[row].sourceColumn = column;
+    }
+    let note = state.pitchMap[row][actualColumn].pitch;
     Max.post("Note " + (velocity > 0 ? "On: " : "Off: ") + note + "\n");
-    state.voices[row].isPlaying = velocity > 0;
     Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1); // Open MPE gate
     Max.outlet(HANDLER_MIDI_NOTE, note, velocity); // Send note message
     Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0); // Close MPE gate

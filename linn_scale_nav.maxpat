@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 85.0, 99.0, 1000.0, 823.0 ],
+		"rect" : [ 85.0, 100.0, 1000.0, 823.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -80,17 +80,6 @@
 					"presentation_linecount" : 2,
 					"presentation_rect" : [ 5.0, 114.5, 179.0, 33.0 ],
 					"text" : "Note: This patch currently uses per-row MPE"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-167",
-					"maxclass" : "newobj",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 347.0, 458.0, 32.0, 22.0 ],
-					"text" : "print"
 				}
 
 			}
@@ -320,7 +309,7 @@
 					"numinlets" : 7,
 					"numoutlets" : 2,
 					"outlettype" : [ "int", "" ],
-					"patching_rect" : [ 908.0, 616.0, 82.0, 22.0 ],
+					"patching_rect" : [ 908.0, 603.0, 82.0, 22.0 ],
 					"text" : "midiformat"
 				}
 
@@ -1899,16 +1888,7 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-167", 0 ],
-					"order" : 0,
-					"source" : [ "obj-64", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
 					"destination" : [ "obj-55", 0 ],
-					"order" : 1,
 					"source" : [ "obj-64", 0 ]
 				}
 
