@@ -9,6 +9,8 @@ const HANDLER_NRPN_VALUE = "NRPN_value";
 const HANDLER_MIDI_NOTE = "midinote";
 const HANDLER_MIDI_POLY_PRESSURE = "midipoly";
 const HANDLER_MIDI_CC = "midicc";
+const HANDLER_MIDI_PITCH_BEND = "midipitchbend";
+const HANDLER_MIDI_AFTERTOUCH = "midiaftertouch";
 const HANDLER_MIDI_CHANNEL = "midichannel"; // Used for configuration messages to the LinnStrument
 const HANDLER_MPE_CHANNEL_GATE = "mpechannelgate"; // Used for note messages, needs to be reset to 0 to close gate after sending note messages
 const HANDLER_SCALE_ROOT = "scaleroot";
@@ -44,8 +46,8 @@ const MessageState = Object.freeze({
 
 class RowVoice {
     constructor() {
-        this.sourceColumn = 1; // Column that triggered the note on
-        this.currentColumn = 1; // Column the user is currently pressing
+        this.sourceColumn = 0; // Column that triggered the note on
+        this.currentColumn = 0; // Column the user is currently pressing
         // Raw X value from MIDI, 14-bit combining MSB and LSB
         // (between 0 and MAX_X_POSITION_16_COL or MAX_X_POSITION_25_COL depending on grid width)
         this.rawX = 0;
@@ -64,10 +66,11 @@ var state = {
     rowOffset: 4,
     startOctave: 1,
     pbRangeOctaves: 2, // octaves
+    yCC: 1, // MIDI CC used for Y data
     mode: "regular", // or "alternating"
     currentScale: "c_diatonic",
     pitchMap: [],
-    voices: Array(8).fill(new RowVoice()), // Array of active voices, indexed by row
+    voices: Array.from({ length: 8 }, () => new RowVoice()), // Array of active voices, indexed by row (distinct instances)
     playedNotes: new Map(), // Map of currently active pitches to the cells that represent them
     messageState: MessageState.NORMAL
 };
@@ -217,6 +220,10 @@ Max.addHandler(HANDLER_MIDI_POLY_PRESSURE, (note, value, channel) => {
     var column = note;
     if (state.voices[row].currentColumn === column) {
         state.voices[row].z = value;
+        // Send Z value
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
+        Max.outlet(HANDLER_MIDI_AFTERTOUCH, state.voices[row].z);
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
     }
     Max.post("Updated Z position for row: " + row + " -> " + value + "\n");
 });
@@ -224,6 +231,7 @@ Max.addHandler(HANDLER_MIDI_POLY_PRESSURE, (note, value, channel) => {
 Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
     if (state.isXEnabled) {
         var row = channel - 1;
+        if (row < 0 || row > 7) { return; } // Invalid row, ignore message
         if (ccNum <= 25 || (ccNum >= 32 && ccNum <= 57)) {
             // CC 0-25  CC Number:    Column,  Channel: Row,      Data: Global X Position MSB
             // CC 32-57 CC Number-32: Column,  Channel: Row,      Data: Global X Position LSB
@@ -251,6 +259,10 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
                 // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
                 let pbValue = Math.round((distanceNorm / maxDistanceNorm) * 64) + 64;
                 state.voices[row].pitchBend = pbValue;
+                // Send pitch bend MIDI message
+                Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
+                Max.outlet(HANDLER_MIDI_PITCH_BEND, state.voices[row].pitchBend);
+                Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
                 Max.post("Updated Pitch Bend for row: " + row + " -> " + pbValue + "\n");
             } else {
                 // LSB comes in first
@@ -269,6 +281,10 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
         var row = channel - 1;
         var column = ccNum - 64;
         state.voices[row].y = ccValue;
+        // Send Y value
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
+        Max.outlet(HANDLER_MIDI_CC, 1, state.voices[row].y);
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
         Max.post("Updated Y position for row: " + row + " -> " + state.voices[row].y + "\n");
     }
     // Z data comes in through poly pressure, not here
@@ -282,6 +298,7 @@ function handleNoteOnOff(row, column, velocity) {
     let actualColumn = column;
     if (state.voices[row].sourceColumn !== column && velocity == 0) {
         // Send note off for source column instead of current one
+        //Max.post("Note off for column: " + state.voices[row].sourceColumn + " on row: " + row + "\n");
         actualColumn = state.voices[row].sourceColumn;
     } else if (velocity > 0) {
         state.voices[row].sourceColumn = column;
