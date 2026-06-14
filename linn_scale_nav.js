@@ -44,10 +44,13 @@ const MessageState = Object.freeze({
     EXPECT_NOTE_OFF: 2
 });
 
-class RowVoice {
-    constructor() {
-        this.sourceColumn = 0; // Column that triggered the note on
-        this.currentColumn = 0; // Column the user is currently pressing
+class Voice {
+    constructor(channel, row, column, velocity) {
+        this.channel = channel;
+        this.row = row;
+        this.sourceColumn = column; // Column that triggered the note on
+        this.currentColumn = column; // Column the user is currently pressing
+        this.velocity = velocity; // Velocity of the note, between 0 and 127, used for matching when sliding
         // Raw X value from MIDI, 14-bit combining MSB and LSB
         // (between 0 and MAX_X_POSITION_16_COL or MAX_X_POSITION_25_COL depending on grid width)
         this.rawX = 0;
@@ -70,9 +73,10 @@ var state = {
     mode: "regular", // or "alternating"
     currentScale: "c_diatonic",
     pitchMap: [],
-    voices: Array.from({ length: 8 }, () => new RowVoice()), // Array of active voices, indexed by row (distinct instances)
+    voices: new Map(), // Map of MPE channel to Voice object
     playedNotes: new Map(), // Map of currently active pitches to the cells that represent them
-    messageState: MessageState.NORMAL
+    messageState: MessageState.NORMAL,
+    transitioningColumn: 0 // Used when message state is EXPECT_NOTE_ON to signify the originating column for the slide
 };
 
 // Converts a tuple of (row, col) to a string key for use in maps
@@ -194,6 +198,10 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
     let column = args[0] - 1;
     let velocity = args[1];
     let row = args[2] - 1;
+    // Clear message state if there's no voices left
+    if (state.voices.size === 0) {
+        state.messageState = MessageState.NORMAL;
+    }
     //Max.post("Note event - row: " + row + ", column: " + column +  ", velocity: " + velocity + "\n");
     if (state.messageState == MessageState.NORMAL) {
         let mappedPitchEntry = state.pitchMap[row][column];
@@ -206,10 +214,14 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
             handleAdjacentScaleChange(mappedPitchEntry.scale);
         }
     } else if (state.messageState == MessageState.EXPECT_NOTE_ON) {
-        state.voices[row].currentColumn = column;
-        Max.post("Slide to column: " + column + " on row: " + row + "\n");
-        state.messageState = MessageState.EXPECT_NOTE_OFF;
+        var voice = findVoice(row, state.transitioningColumn);
+        if (voice != null) {
+            voice.currentColumn = column;
+            Max.post("Slide on channel: " + voice.channel + " to column: " + column + " on row: " + row + "\n");
+            state.messageState = MessageState.EXPECT_NOTE_OFF;
+        }
     } else if (state.messageState == MessageState.EXPECT_NOTE_OFF) {
+        //Max.post("Received note off for row: " + row + " and column: " + column + " and velocity: " + velocity + "\n");
         state.messageState = MessageState.NORMAL;
     }
 });
@@ -217,15 +229,18 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
 Max.addHandler(HANDLER_MIDI_POLY_PRESSURE, (note, value, channel) => {
     // Polyphonic Pressure        Z data,       Note Number: Column,  Channel: Row,      Data: Per Cell Z Position
     var row = channel - 1;
-    var column = note;
-    if (state.voices[row].currentColumn === column) {
-        state.voices[row].z = value;
+    var column = note - 1;
+    var voice = findVoice(row, column);
+    if (voice != null) {
+        voice.z = value;
         // Send Z value
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
-        Max.outlet(HANDLER_MIDI_AFTERTOUCH, state.voices[row].z);
+        Max.outlet(HANDLER_MIDI_AFTERTOUCH, voice.z);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
+         Max.post("Updated Z position for channel: " + voice.channel + " -> " + value + "\n");
+    } else {
+        Max.post("No active voice found for row: " + row + " and column: " + column + "\n");
     }
-    Max.post("Updated Z position for row: " + row + " -> " + value + "\n");
 });
 
 Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
@@ -235,14 +250,18 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
         if (ccNum <= 25 || (ccNum >= 32 && ccNum <= 57)) {
             // CC 0-25  CC Number:    Column,  Channel: Row,      Data: Global X Position MSB
             // CC 32-57 CC Number-32: Column,  Channel: Row,      Data: Global X Position LSB
-            var column = ccNum <= 25 ? ccNum : ccNum - 32;
-            state.voices[row].currentColumn = column;
-            var xPosition = state.voices[row].rawX;
+            var column = (ccNum <= 25 ? ccNum : ccNum - 32) - 1; // Subtract one to skip settings column
+            var voice = findVoice(row, column);
+            if (voice == null) {
+                Max.post("No active voice found for row: " + row + " and column: " + column + "\n");
+                return;
+            }
+            var xPosition = voice.rawX;
             if (ccNum <= 25) {
                 // MSB comes in second
                 xPosition = (ccValue << 7) | (xPosition & 0x7F);
                 // Calculate pitch bend around the voice's source column
-                let sourceXNorm = (state.voices[row].sourceColumn + 0.5) / state.gridWidth;
+                let sourceXNorm = (voice.sourceColumn + 0.5) / state.gridWidth;
                 let curXNorm = xPosition / (state.gridWidth == 16 ? MAX_X_POSITION_16_COL : MAX_X_POSITION_25_COL);
                 // Map the X position to a pitch bend value between 0 and 127 based on distance from source column,
                 // scaled by the configured pitch bend range in octaves (where 1 octave = 7 cells of distance)
@@ -258,17 +277,17 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
                 }
                 // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
                 let pbValue = Math.round((distanceNorm / maxDistanceNorm) * 64) + 64;
-                state.voices[row].pitchBend = pbValue;
+                voice.pitchBend = pbValue;
                 // Send pitch bend MIDI message
                 Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
-                Max.outlet(HANDLER_MIDI_PITCH_BEND, state.voices[row].pitchBend);
+                Max.outlet(HANDLER_MIDI_PITCH_BEND, voice.pitchBend);
                 Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
-                Max.post("Updated Pitch Bend for row: " + row + " -> " + pbValue + "\n");
+                //Max.post("Updated Pitch Bend for channel: " + voice.channel + " -> " + pbValue + "\n");
             } else {
                 // LSB comes in first
                 xPosition = ccValue;
             }
-            state.voices[row].rawX = xPosition;
+            voice.rawX = xPosition;
         } else if (ccNum == 119) {
             // CC 119                                                           Channel: Row,      Data: Transitioning Column
             //  - After CC 119 Note On    Target Cell,  Note Number: Column,    Channel: Row,  Velocity: First Slide Cell's Velocity
@@ -276,16 +295,22 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
             // Transitioning column, can be used to update the source column for the voice when sliding between columns
             //Max.post("Got cell transition for row: " + row + " from column: " + (ccValue - 1) + "\n");
             state.messageState = MessageState.EXPECT_NOTE_ON;
+            state.transitioningColumn = ccValue - 1;
         }
     } else if (state.isYEnabled && ccNum >= 64 && ccNum <= 89) {
         var row = channel - 1;
-        var column = ccNum - 64;
-        state.voices[row].y = ccValue;
+        var column = ccNum - 64 - 1; // Subtract 1 to skip settings column
+        var voice = findVoice(row, column);
+        if (voice == null) {
+            Max.post("No active voice found for row: " + row + " and column: " + column + "\n");
+            return;
+        }
+        voice.y = ccValue;
         // Send Y value
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
-        Max.outlet(HANDLER_MIDI_CC, 1, state.voices[row].y);
+        Max.outlet(HANDLER_MIDI_CC, 1, voice.y);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
-        Max.post("Updated Y position for row: " + row + " -> " + state.voices[row].y + "\n");
+        Max.post("Updated Y position for channel: " + voice.channel + " -> " + voice.y + "\n");
     }
     // Z data comes in through poly pressure, not here
 });
@@ -294,17 +319,45 @@ Max.addHandler(HANDLER_PB_RANGE, (value) => {
     state.pbRangeOctaves = value / 12;
 });
 
+function findVoice(row, column) {
+    // Find the voice that matches the given row and column, return null if not found
+    for (let voice of state.voices.values()) {
+        if (voice.row === row && voice.currentColumn === column) {
+            return voice;
+        }
+    }
+    return null;
+}
+
 function handleNoteOnOff(row, column, velocity) {
     let actualColumn = column;
-    if (state.voices[row].sourceColumn !== column && velocity == 0) {
+    var voice = findVoice(row, column);
+    if (voice != null && voice.sourceColumn !== column && velocity == 0) {
         // Send note off for source column instead of current one
-        //Max.post("Note off for column: " + state.voices[row].sourceColumn + " on row: " + row + "\n");
-        actualColumn = state.voices[row].sourceColumn;
+        //Max.post("Note off for column: " + voice.sourceColumn + " on row: " + row + "\n");
+        actualColumn = voice.sourceColumn;
     } else if (velocity > 0) {
-        state.voices[row].sourceColumn = column;
+        // Create new voice for note on
+        if (voice != null) {
+            Max.post("Unexpected.. there's an active voice already here.");
+            return;
+        }
+        // Find next available channel for new voice
+        var newChannel = 1;
+        while (state.voices.has(newChannel) && newChannel < 8) {
+            newChannel++;
+        }
+        voice = new Voice(newChannel, row, column, velocity);
+        Max.post("Creating new voice for channel: " + voice.channel + " with row: " + voice.row + " , column: " + voice.currentColumn + " and velocity: " + voice.velocity + "\n");
+        state.voices.set(newChannel, voice);
+    }
+    if (voice != null && velocity == 0) {
+        // Note off, remove voice
+        Max.post("Deleting voice for channel: " + voice.channel + "\n");
+        state.voices.delete(voice.channel);
     }
     let note = state.pitchMap[row][actualColumn].pitch;
-    Max.post("Note " + (velocity > 0 ? "On: " : "Off: ") + note + "\n");
+    //Max.post("Note " + (velocity > 0 ? "On: " : "Off: ") + note + "\n");
     Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1); // Open MPE gate
     Max.outlet(HANDLER_MIDI_NOTE, note, velocity); // Send note message
     Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0); // Close MPE gate
@@ -330,8 +383,8 @@ function handleAdjacentScaleChange(newScaleName) {
         // Capitalize first letter of each word in scale class and replace underscores with spaces
         var scaleClass = match[2].replace(/_/g, " ");
         scaleClass = scaleClass.split(" ").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
-        Max.outlet(SCALE_ROOT, root);
-        Max.outlet(SCALE_CLASS, scaleClass);
+        Max.outlet(HANDLER_SCALE_ROOT, root);
+        Max.outlet(HANDLER_SCALE_CLASS, scaleClass);
     }
 }
 

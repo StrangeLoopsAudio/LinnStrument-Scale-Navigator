@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 85.0, 100.0, 1000.0, 823.0 ],
+		"rect" : [ 88.0, 99.0, 952.0, 823.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -662,7 +662,6 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 360.0, 139.0, 87.0, 22.0 ],
-					"presentation_linecount" : 2,
 					"text" : "startOctave $1"
 				}
 
@@ -680,6 +679,8 @@
 					"presentation_rect" : [ 260.5, 95.0, 78.0, 15.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ 1 ],
+							"parameter_initial_enable" : 1,
 							"parameter_longname" : "live.numbox[1]",
 							"parameter_mmax" : 4.0,
 							"parameter_mmin" : -1.0,
@@ -798,7 +799,7 @@
 , 			{
 				"box" : 				{
 					"id" : "obj-6",
-					"items" : [ "AU DLS Synth 1", ",", "from Max 1", ",", "from Max 2" ],
+					"items" : [ "AU DLS Synth 1", ",", "LinnStrument MIDI", ",", "from Max 1", ",", "from Max 2" ],
 					"maxclass" : "umenu",
 					"numinlets" : 1,
 					"numoutlets" : 3,
@@ -929,6 +930,8 @@
 					"presentation_rect" : [ 260.5, 68.5, 78.0, 15.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ 4 ],
+							"parameter_initial_enable" : 1,
 							"parameter_longname" : "live.numbox",
 							"parameter_mmax" : 7.0,
 							"parameter_modmode" : 0,
@@ -1043,7 +1046,7 @@
 , 			{
 				"box" : 				{
 					"id" : "obj-8",
-					"items" : [ "AU DLS Synth 1", ",", "from Max 1", ",", "from Max 2", ",", "LinnStrument MIDI" ],
+					"items" : [ "AU DLS Synth 1", ",", "LinnStrument MIDI", ",", "from Max 1", ",", "from Max 2" ],
 					"maxclass" : "umenu",
 					"numinlets" : 1,
 					"numoutlets" : 3,
@@ -1240,7 +1243,7 @@
 					"numoutlets" : 1,
 					"offset" : [ 0.0, 0.0 ],
 					"outlettype" : [ "bang" ],
-					"patching_rect" : [ 34.5, 695.0, 423.0, 216.0 ],
+					"patching_rect" : [ 34.5, 695.0, 400.0, 220.0 ],
 					"viewvisibility" : 1
 				}
 
@@ -1268,8 +1271,6 @@
 					"saved_object_attributes" : 					{
 						"autostart" : 1,
 						"defer" : 0,
-						"node_bin_path" : "",
-						"npm_bin_path" : "",
 						"watch" : 0
 					}
 ,
