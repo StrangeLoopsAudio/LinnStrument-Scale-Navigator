@@ -476,79 +476,32 @@ function calculateQuantizedX(
  */
 function calculatePitchBend(curX, sourceX, row) {
     // Calculate the distance between the current and source positions
-    const maxDistanceNorm = (state.pbRangeOctaves * 7) / state.gridWidth; // Each scale has 7 degrees
-    var dxNorm = sourceX - curX;
-    // Limit to max distance
-    dxNorm = Math.min(Math.max(dxNorm, sourceX - maxDistanceNorm), sourceX + maxDistanceNorm);
-
-    // Get the dx in cells between curX and sourceX
-    let dxInCells = dxNorm * state.gridWidth;
-    // Get the dx in semitones between the source and current X
-    const curCellIdxFloat = curX * state.gridWidth;
-    const curCellIdx = Math.floor(curCellIdxFloat);
-    const curCell = state.pitchMap[row][curCellIdx];
-    var dxInSemitones = curCell.pitch - state.pitchMap[row][Math.floor(sourceX * state.gridWidth)].pitch;
-    // Add/remove the remainder
-    const remainderInCells = curCellIdxFloat - Math.trunc(curCellIdxFloat);
-
-    const movingLeft = curX < sourceX;
-    const inLeftHalf = remainderInCells < 0.5;
-    const useLeftNeighbor = /*movingLeft ===*/ inLeftHalf;
-    const numPitchClasses = Data.scales[curCell.scale].pitch_classes.length;
-    const scaleDegree = state.pitchMap[row][curCellIdx].scaleDegree;
-
-    const neighborCell = useLeftNeighbor
-        ? state.pitchMap[row][Math.floor(curCellIdx) - 1]
-        : state.pitchMap[row][Math.floor(curCellIdx) + 1];
-
-    let neighborPitch = neighborCell.pitch;
-    // if (useLeftNeighbor) {
-    //     const wrapped = (scaleDegree - 1 + numPitchClasses) % numPitchClasses;
-    //     const octaveAdjust = (scaleDegree === 0) ? -12 : 0;
-    //     neighborPitch = curCell.pitch + octaveAdjust - Data.scales[curCell.scale].pitch_classes[wrapped];
-    //     Max.post("cur: " + curCell.pitch + ", neighbor: " + Data.scales[curCell.scale].pitch_classes[wrapped]);
-    // } else {
-    //     const wrapped = (scaleDegree + 1) % numPitchClasses;
-    //     const octaveAdjust = (scaleDegree === numPitchClasses - 1) ? 12 : 0;
-    //     neighborPitch = curCell.pitch + octaveAdjust + Data.scales[curCell.scale].pitch_classes[wrapped];
-    // }
-    // const neighborPitch = useLeftNeighbor
-    //     ? curCell.pitch - Data.scales[curCell.scale].pitch_classes[(scaleDegree - 1) % numPitchClass]
-    //     : curCell.pitch + Data.scales[curCell.scale].pitch_classes[(scaleDegree + 1) % numPitchClass];
-
-    let exactSemitones;
-    if (inLeftHalf) {
-        exactSemitones =
-            remainderInCells * 2 * curCell.pitch +
-            (0.5 - remainderInCells) * 2 * neighborPitch;
-    } else {
-        exactSemitones =
-            (1.0 - remainderInCells) * 2 * curCell.pitch +
-            (remainderInCells - 0.5) * 2 * neighborPitch;
-    }
-
-    dxInSemitones += exactSemitones - curCell.pitch;
-    //Max.post("dx sm: " + dxInSemitones);
-
-    // var remainderSemitones = 0;
-    // if (curX < sourceX && remainderInCells < 0.5) {
-    //     // [ c   ][][s]  c < s, remainder +, use left
-    //     const pitchLeft = curCell.pitch - Data.scales[curCell.scale].pitch_classes[(state.pitchMap[row][Math.floor(curCell)].scaleDegree - 1) % Data.scales[curCell.scale].pitch_classes.length];
-    //     const exactSemitones = (remainderInCells * 2.0 * curCell.pitch) + ((0.5 - remainderInCells) * 2.0 * pitchLeft);
-    //     dxInSemitones += (exactSemitones - curCell.pitch);
-    // } else if (curX < sourceX && remainderInCells > 0.5) {
-    //     // [   c ][][s]  c < s, remainder -, use right
-    // } else if (curX > sourceX && remainderInCells > 0.5) {
-    //     // [s][][   c ]  c > s, remainder +, use right
-    // } else if (curX > sourceX && remainderInCells > 0.5) {
-    //     // [s][][ c   ]  c > s, remainder -, use left
-    // }
+    const sourceSemitones = interpolatePitchArray(state.pitchMap[row], sourceX * state.gridWidth);
+    const curSemitones = interpolatePitchArray(state.pitchMap[row], curX * state.gridWidth);
+    const dxSemitones = curSemitones - sourceSemitones;
+    Max.post("x: " + dxSemitones);
 
     // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
-    let pbValue = Math.round((dxInSemitones / (state.pbRangeOctaves * 12)) * 64) + 64;
+    let pbValue = Math.round((dxSemitones / (state.pbRangeOctaves * 12)) * 64) + 64;
     Max.outlet(HANDLER_DEBUG, pbValue);
-    Max.post("pitch bend: " + pbValue);
+    //Max.post("pitch bend: " + pbValue);
     return pbValue;
+}
+
+function interpolatePitchArray(arr, index) {
+    if (index <= 0)
+        return arr[0].pitch;
+
+    if (index >= arr.length - 1)
+        return arr[arr.length - 1].pitch;
+
+    // Shift so that n + 0.5 lands exactly on arr[n].
+    index -= 0.5;
+
+    const i = Math.floor(index);
+    const t = index - i;
+
+    return arr[i].pitch + (arr[i + 1].pitch - arr[i].pitch) * t;
 }
 
 function handleAdjacentScaleChange(newScaleName) {
