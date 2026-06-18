@@ -28,10 +28,12 @@ function getPrimaryRow(startScaleIdx, primaryPitches, gridWidth, startOctave, sc
     let basePitch = (startOctave + 1) * 12;
     for (var col = 0; col < gridWidth; col++) {
         let octaveMult = Math.floor((startScaleIdx + col) / primaryPitches.length);
-        let pitchClass = primaryPitches[(startScaleIdx + col) % primaryPitches.length];
+        let scaleDegree = (startScaleIdx + col) % primaryPitches.length;
+        let pitchClass = primaryPitches[scaleDegree];
         let entry = {
             pitch: basePitch + (octaveMult * 12) + pitchClass,
-            scale: scaleName
+            scale: scaleName,
+            scaleDegree: scaleDegree,
         };
         row.push(entry);
     }
@@ -43,10 +45,12 @@ function getSecondaryRow(index, adjacentPitches, gridWidth, startOctave) {
     let basePitch = (startOctave + index + 1) * 12;
     for (var col = 0; col < gridWidth; col++) {
         let octaveMult = Math.floor(col / adjacentPitches.length);
-        let pitchClass = adjacentPitches[col % adjacentPitches.length].pitch;
+        let scaleDegree = col % adjacentPitches.length;
+        let pitchClass = adjacentPitches[scaleDegree].pitch;
         let entry = {
             pitch: basePitch + (octaveMult * 12) + pitchClass,
-            scale: adjacentPitches[col % adjacentPitches.length].scale
+            scale: adjacentPitches[col % adjacentPitches.length].scale,
+            scaleDegree: scaleDegree
         };
         row.push(entry);
     }

@@ -17,6 +17,8 @@ const HANDLER_SCALE_ROOT = "scaleroot";
 const HANDLER_SCALE_CLASS = "scaleclass";
 const HANDLER_ENABLE = "enable";
 const HANDLER_ENABLE_X = "enableX";
+const HANDLER_QUANTIZE_X = "quantize";
+const HANDLER_QUANTIZE_X_HOLD = "quantizeHold";
 const HANDLER_ENABLE_Y = "enableY";
 const HANDLER_ENABLE_Z = "enableZ";
 const HANDLER_GRID_WIDTH = "gridWidth";
@@ -25,10 +27,13 @@ const HANDLER_START_OCTAVE = "startOctave";
 const HANDLER_PB_RANGE = "pbRange";
 const HANDLER_MODE = "mode";
 const HANDLER_PRINT_PITCH_MAP = "printPitchMap";
+const HANDLER_DEBUG = "debug";
 
 // Max X position values for the 2 different grid widths for common LinnStruments
-const MAX_X_POSITION_16_COL = 2736;
+const MAX_X_POSITION_16_COL = 2741;
 const MAX_X_POSITION_25_COL = 4265;
+
+const HOLD_TIMER_MS = 200;
 
 const secondaryColorMap = new Map();
 secondaryColorMap.set(0, 7); // no change -> off
@@ -53,7 +58,14 @@ class Voice {
         this.velocity = velocity; // Velocity of the note, between 0 and 127, used for matching when sliding
         // Raw X value from MIDI, 14-bit combining MSB and LSB
         // (between 0 and MAX_X_POSITION_16_COL or MAX_X_POSITION_25_COL depending on grid width)
+        // X movement fields
         this.rawX = 0;
+        this.initialX = -1;
+        this.lastActualX = -1;
+        this.quantizationOffsetX = 0;
+        this.rateX = 0;
+        this.rateCount = 1;
+        this.lastTimestamp = performance.now();
         this.pitchBend = 64; // Rescaled rawX after pitch bend calculation between 0 - 127
         this.y = 0; // Between 0 - 127
         this.z = 0; // Between 0 - 127
@@ -63,6 +75,8 @@ class Voice {
 var state = {
     isEnabled: true,
     isXEnabled: false,
+    isXQuantizeEnabled: false,
+    isXQuantizeHoldEnabled: false,
     isYEnabled: false,
     isZEnabled: false,
     gridWidth: 16,
@@ -101,6 +115,16 @@ Max.addHandler(HANDLER_ENABLE_X, (v) => {
         Max.outlet(HANDLER_MIDI_CC, 9, state.isXEnabled); // Enables row slide
         Max.outlet(HANDLER_MIDI_CC, 10, state.isXEnabled); // Enables X data
     }
+});
+
+Max.addHandler(HANDLER_QUANTIZE_X, (v) => {
+    state.isXQuantizeEnabled = v ? 1 : 0;
+    Max.post("X-axis quantize: " + state.isXQuantizeEnabled + "\n");
+});
+
+Max.addHandler(HANDLER_QUANTIZE_X_HOLD, (v) => {
+    state.isXQuantizeHoldEnabled = v ? 1 : 0;
+    Max.post("X-axis quantize hold: " + state.isXQuantizeHoldEnabled + "\n");
 });
 
 Max.addHandler(HANDLER_ENABLE_Y, (v) => {
@@ -217,6 +241,8 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
         var voice = findVoice(row, state.transitioningColumn);
         if (voice != null) {
             voice.currentColumn = column;
+            let centerX = (voice.sourceColumn + 0.5) / state.gridWidth;
+            voice.initialX = centerX; // Reset center strike to actual center of source column
             Max.post("Slide on channel: " + voice.channel + " to column: " + column + " on row: " + row + "\n");
             state.messageState = MessageState.EXPECT_NOTE_OFF;
         }
@@ -263,21 +289,16 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
                 // Calculate pitch bend around the voice's source column
                 let sourceXNorm = (voice.sourceColumn + 0.5) / state.gridWidth;
                 let curXNorm = xPosition / (state.gridWidth == 16 ? MAX_X_POSITION_16_COL : MAX_X_POSITION_25_COL);
-                // Map the X position to a pitch bend value between 0 and 127 based on distance from source column,
-                // scaled by the configured pitch bend range in octaves (where 1 octave = 7 cells of distance)
-                // First calculate the max distance in normalized X from the source column that corresponds to the configured pitch bend range in octaves
-                let maxDistanceNorm = (state.pbRangeOctaves * 7) / state.gridWidth;
-                // Then calculate the distance from the source column in normalized X
-                let distanceNorm = curXNorm - sourceXNorm;
-                // Limit the distanceNorm to the maxDistanceNorm
-                if (distanceNorm > maxDistanceNorm) {
-                    distanceNorm = maxDistanceNorm;
-                } else if (distanceNorm < -maxDistanceNorm) {
-                    distanceNorm = -maxDistanceNorm;
+                //Max.post("curX: " + curXNorm);
+                // If this is the initial strike, set the initialX and lastActualX
+                if (voice.initialX === -1) {
+                    voice.initialX = curXNorm;
+                    voice.lastActualX = curXNorm;
                 }
-                // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
-                let pbValue = Math.round((distanceNorm / maxDistanceNorm) * 64) + 64;
-                voice.pitchBend = pbValue;
+
+                curXNorm = calculateQuantizedX(voice, curXNorm);
+                voice.pitchBend = calculatePitchBend(curXNorm, sourceXNorm, voice.row);
+
                 // Send pitch bend MIDI message
                 Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
                 Max.outlet(HANDLER_MIDI_PITCH_BEND, voice.pitchBend);
@@ -371,6 +392,165 @@ function handleNoteOnOff(row, column, velocity) {
     }
 }
 
+/**
+ * Calculates the exact quantized X position for a voice based on LinnStrument code mechanics.
+ * 
+ * @param {Object} voice - The per-voice state state tracker.
+ * @param {number} actualX - The X coordinate detected this frame.
+ * @returns {number} The expression X coordinate used directly for generating pitch output.
+ */
+function calculateQuantizedX(
+    voice,
+    actualX
+) {
+    // Tunable parameters
+    const SNAP_DEADBAND = 0.01; // Deadband for quantizing
+    const SPEED_THRESHOLD = 0.003; // coordinate units
+    const HOLD_TIME = 0.15;        // seconds to fully snap
+    const RELEASE_TIME = 0.05;     // seconds to fully release
+
+    let centerX = (voice.currentColumn + 0.5) / state.gridWidth;
+
+    // INITIAL QUANTIZE COMPUTE
+    if (state.isXQuantizeEnabled) {
+        // Measure absolute distance from where the note originally struck
+        const distanceFromStrike = Math.abs(actualX - voice.initialX);
+
+        if (distanceFromStrike < SNAP_DEADBAND) {
+            // Finger remains inside the lock zone: force output precisely to center
+            // Offset tracks how far the user is pulling away from perfect center mapping
+            voice.quantizationOffsetX = actualX - centerX;
+        }
+        //Max.post("distance: " + distanceFromStrike.toFixed(3) + ", in?: " + (distanceFromStrike < SNAP_DEADBAND));
+    }
+
+    // QUANTIZE HOLD COMPUTE
+    if (state.isXQuantizeHoldEnabled) {
+        // Compute dt
+        const nowTs = performance.now();
+        const dt = Math.max(0.001, (nowTs - voice.lastTimestamp) / 1000.0);
+        voice.lastTimestamp = nowTs;
+
+        const deltaX = Math.abs(actualX - voice.lastActualX);
+        voice.lastActualX = actualX;
+
+        // 5-sample equivalent exponential smoothing
+        const tau = 5.0 / 200.0; // ~5 samples at ~200 Hz LinnStrument scan rate
+        const k = 1 - Math.exp(-dt / tau);
+        voice.rateX += (deltaX - voice.rateX) * k;
+        //Max.post("rateX: " + voice.rateX);
+        //Max.outlet(HANDLER_DEBUG, voice.rateX);
+
+        // Update stability
+        if (voice.rateX <= SPEED_THRESHOLD) {
+            voice.rateCount = Math.min(1, voice.rateCount + dt / HOLD_TIME);
+        } else {
+            voice.rateCount = Math.max(0, voice.rateCount - dt / RELEASE_TIME);
+        }
+        //Max.post("rateCount: " + voice.rateCount);
+        //Max.outlet(HANDLER_DEBUG, voice.rateCount);
+
+        // Blend between actual and quantized positions
+        const alpha = 1 - voice.rateCount;
+        const actualPosition = actualX - voice.quantizationOffsetX;
+        const ret = alpha * actualPosition + (1 - alpha) * centerX;
+
+        //Max.post("ret: " + ret);
+
+        // Return early with quantized X here
+        return ret;
+    }
+
+    // Absolute position tracking minus the active quantization correction profile offset
+    return actualX - voice.quantizationOffsetX;
+}
+
+/**
+ * Calculates pitch bend given the current X and source X (both normalized), taking
+ * into account irregular spacing of semitones between cells due to scales.
+ * 
+ * @param {number} curX - The current X coordinate detected this frame.
+ * @param {number} sourceX - The starting X coordinate of the drag.
+ * @param {number} row - The row this X movement is applied on.
+ * @returns {number} The pitch bend value between 0 and 127.
+ */
+function calculatePitchBend(curX, sourceX, row) {
+    // Calculate the distance between the current and source positions
+    const maxDistanceNorm = (state.pbRangeOctaves * 7) / state.gridWidth; // Each scale has 7 degrees
+    var dxNorm = sourceX - curX;
+    // Limit to max distance
+    dxNorm = Math.min(Math.max(dxNorm, sourceX - maxDistanceNorm), sourceX + maxDistanceNorm);
+
+    // Get the dx in cells between curX and sourceX
+    let dxInCells = dxNorm * state.gridWidth;
+    // Get the dx in semitones between the source and current X
+    const curCellIdxFloat = curX * state.gridWidth;
+    const curCellIdx = Math.floor(curCellIdxFloat);
+    const curCell = state.pitchMap[row][curCellIdx];
+    var dxInSemitones = curCell.pitch - state.pitchMap[row][Math.floor(sourceX * state.gridWidth)].pitch;
+    // Add/remove the remainder
+    const remainderInCells = curCellIdxFloat - Math.trunc(curCellIdxFloat);
+
+    const movingLeft = curX < sourceX;
+    const inLeftHalf = remainderInCells < 0.5;
+    const useLeftNeighbor = /*movingLeft ===*/ inLeftHalf;
+    const numPitchClasses = Data.scales[curCell.scale].pitch_classes.length;
+    const scaleDegree = state.pitchMap[row][curCellIdx].scaleDegree;
+
+    const neighborCell = useLeftNeighbor
+        ? state.pitchMap[row][Math.floor(curCellIdx) - 1]
+        : state.pitchMap[row][Math.floor(curCellIdx) + 1];
+
+    let neighborPitch = neighborCell.pitch;
+    // if (useLeftNeighbor) {
+    //     const wrapped = (scaleDegree - 1 + numPitchClasses) % numPitchClasses;
+    //     const octaveAdjust = (scaleDegree === 0) ? -12 : 0;
+    //     neighborPitch = curCell.pitch + octaveAdjust - Data.scales[curCell.scale].pitch_classes[wrapped];
+    //     Max.post("cur: " + curCell.pitch + ", neighbor: " + Data.scales[curCell.scale].pitch_classes[wrapped]);
+    // } else {
+    //     const wrapped = (scaleDegree + 1) % numPitchClasses;
+    //     const octaveAdjust = (scaleDegree === numPitchClasses - 1) ? 12 : 0;
+    //     neighborPitch = curCell.pitch + octaveAdjust + Data.scales[curCell.scale].pitch_classes[wrapped];
+    // }
+    // const neighborPitch = useLeftNeighbor
+    //     ? curCell.pitch - Data.scales[curCell.scale].pitch_classes[(scaleDegree - 1) % numPitchClass]
+    //     : curCell.pitch + Data.scales[curCell.scale].pitch_classes[(scaleDegree + 1) % numPitchClass];
+
+    let exactSemitones;
+    if (inLeftHalf) {
+        exactSemitones =
+            remainderInCells * 2 * curCell.pitch +
+            (0.5 - remainderInCells) * 2 * neighborPitch;
+    } else {
+        exactSemitones =
+            (1.0 - remainderInCells) * 2 * curCell.pitch +
+            (remainderInCells - 0.5) * 2 * neighborPitch;
+    }
+
+    dxInSemitones += exactSemitones - curCell.pitch;
+    //Max.post("dx sm: " + dxInSemitones);
+
+    // var remainderSemitones = 0;
+    // if (curX < sourceX && remainderInCells < 0.5) {
+    //     // [ c   ][][s]  c < s, remainder +, use left
+    //     const pitchLeft = curCell.pitch - Data.scales[curCell.scale].pitch_classes[(state.pitchMap[row][Math.floor(curCell)].scaleDegree - 1) % Data.scales[curCell.scale].pitch_classes.length];
+    //     const exactSemitones = (remainderInCells * 2.0 * curCell.pitch) + ((0.5 - remainderInCells) * 2.0 * pitchLeft);
+    //     dxInSemitones += (exactSemitones - curCell.pitch);
+    // } else if (curX < sourceX && remainderInCells > 0.5) {
+    //     // [   c ][][s]  c < s, remainder -, use right
+    // } else if (curX > sourceX && remainderInCells > 0.5) {
+    //     // [s][][   c ]  c > s, remainder +, use right
+    // } else if (curX > sourceX && remainderInCells > 0.5) {
+    //     // [s][][ c   ]  c > s, remainder -, use left
+    // }
+
+    // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
+    let pbValue = Math.round((dxInSemitones / (state.pbRangeOctaves * 12)) * 64) + 64;
+    Max.outlet(HANDLER_DEBUG, pbValue);
+    Max.post("pitch bend: " + pbValue);
+    return pbValue;
+}
+
 function handleAdjacentScaleChange(newScaleName) {
     Max.post("Scale change: " + state.currentScale + " -> " + newScaleName + "\n");
     state.currentScale = newScaleName;
@@ -458,6 +638,7 @@ function displayNotes()
     // CC 22: Color value (0-11)
 
     function displayNotesRegular(rootPitchClass, scaleColor, offColor) {
+        Max.post("root class: " + rootPitchClass);
         for (var row = 0; row < 8; row++) {
             for (var col = 0; col < state.gridWidth; col++) {
                 var mapEntry = state.pitchMap[row][col];
