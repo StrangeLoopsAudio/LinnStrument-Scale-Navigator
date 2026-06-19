@@ -69,14 +69,14 @@ function getAdjacentScalesRow(scaleName, gridWidth) {
     return row;
 }
 
-function getPitchMapRegular(scaleName, gridWidth, rowOffset, startOctave = 3) {
+function getPitchMapRegular(scaleName, gridWidth, rowOffset, startOctave, bottomRowActive) {
     let scaleObj = Data.scales[scaleName];
     let primaryPitches = scaleObj.pitch_classes;
 
     var pitchMap = [];
     var rowStartScaleIdx = 0;
     for (var row = 0; row < 8; row++) {
-        if (row > 0) {
+        if (!bottomRowActive || row > 0) {
             pitchMap[row] = getPrimaryRow(rowStartScaleIdx, primaryPitches, gridWidth, startOctave, scaleName);
             rowStartScaleIdx = rowStartScaleIdx + rowOffset;
         } else {

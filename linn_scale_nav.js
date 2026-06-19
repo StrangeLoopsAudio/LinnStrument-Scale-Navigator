@@ -26,6 +26,7 @@ const HANDLER_ROW_OFFSET = "rowOffset";
 const HANDLER_START_OCTAVE = "startOctave";
 const HANDLER_PB_RANGE = "pbRange";
 const HANDLER_MODE = "mode";
+const HANDLER_BOTTOM_ROW = "bottomRow"
 const HANDLER_PRINT_PITCH_MAP = "printPitchMap";
 const HANDLER_DEBUG = "debug";
 
@@ -85,6 +86,7 @@ var state = {
     pbRangeOctaves: 2, // octaves
     yCC: 1, // MIDI CC used for Y data
     mode: "regular", // or "alternating"
+    bottomRowActive: true,
     currentScale: "c_diatonic",
     pitchMap: [],
     voices: new Map(), // Map of MPE channel to Voice object
@@ -187,6 +189,15 @@ Max.addHandler(HANDLER_MODE, (newMode) => {
     }
 });
 
+Max.addHandler(HANDLER_BOTTOM_ROW, (v) => {
+    if (state.bottomRowActive !== v) {
+        state.bottomRowActive = v;
+        if (state.isEnabled) {
+            updatePitchMap();
+        }
+    }
+});
+
 Max.addHandler(HANDLER_SCALE_ROOT, (v) => {
     // Translate note name (e.g, C, A#) to scale name equivalent (e.g., c, as) and update currentScale while keeping the same scale class if possible
     var noteName = v.toLowerCase();
@@ -260,7 +271,7 @@ Max.addHandler(HANDLER_MIDI_POLY_PRESSURE, (note, value, channel) => {
     if (voice != null) {
         voice.z = value;
         // Send Z value
-        Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel);
         Max.outlet(HANDLER_MIDI_AFTERTOUCH, voice.z);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
          Max.post("Updated Z position for channel: " + voice.channel + " -> " + value + "\n");
@@ -300,7 +311,7 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
                 voice.pitchBend = calculatePitchBend(curXNorm, sourceXNorm, voice.row);
 
                 // Send pitch bend MIDI message
-                Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
+                Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel);
                 Max.outlet(HANDLER_MIDI_PITCH_BEND, voice.pitchBend);
                 Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
                 //Max.post("Updated Pitch Bend for channel: " + voice.channel + " -> " + pbValue + "\n");
@@ -328,8 +339,8 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
         }
         voice.y = ccValue;
         // Send Y value
-        Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1);
-        Max.outlet(HANDLER_MIDI_CC, 1, voice.y);
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel);
+        Max.outlet(HANDLER_MIDI_CC, 74, voice.y);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
         Max.post("Updated Y position for channel: " + voice.channel + " -> " + voice.y + "\n");
     }
@@ -372,16 +383,23 @@ function handleNoteOnOff(row, column, velocity) {
         Max.post("Creating new voice for channel: " + voice.channel + " with row: " + voice.row + " , column: " + voice.currentColumn + " and velocity: " + voice.velocity + "\n");
         state.voices.set(newChannel, voice);
     }
-    if (voice != null && velocity == 0) {
-        // Note off, remove voice
-        Max.post("Deleting voice for channel: " + voice.channel + "\n");
-        state.voices.delete(voice.channel);
-    }
+
+    // Send MPE message
     let note = state.pitchMap[row][actualColumn].pitch;
     //Max.post("Note " + (velocity > 0 ? "On: " : "Off: ") + note + "\n");
-    Max.outlet(HANDLER_MPE_CHANNEL_GATE, row + 1); // Open MPE gate
-    Max.outlet(HANDLER_MIDI_NOTE, note, velocity); // Send note message
-    Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0); // Close MPE gate
+    if (voice != null) {
+        Max.post("channel: " + voice.channel);
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel); // Open MPE gate
+        Max.outlet(HANDLER_MIDI_NOTE, note, velocity); // Send note message
+        Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0); // Close MPE gate
+
+        if (velocity == 0) {
+            // Note off, remove voice
+            Max.post("Deleting voice for channel: " + voice.channel + "\n");
+            state.voices.delete(voice.channel);
+        }
+    }
+
     let cellsForPitch = getCellsForPitch(note);
     if (velocity > 0) {
         state.playedNotes.set(note, cellsForPitch);
@@ -479,24 +497,24 @@ function calculatePitchBend(curX, sourceX, row) {
     const sourceSemitones = interpolatePitchArray(state.pitchMap[row], sourceX * state.gridWidth);
     const curSemitones = interpolatePitchArray(state.pitchMap[row], curX * state.gridWidth);
     const dxSemitones = curSemitones - sourceSemitones;
-    Max.post("x: " + dxSemitones);
 
     // Finally, map the limited distanceNorm to a pitch bend value between 0 and 127, where 64 is centered (no pitch bend)
     let pbValue = Math.round((dxSemitones / (state.pbRangeOctaves * 12)) * 64) + 64;
+    pbValue = Math.min(127, Math.max(0, pbValue)); // Clamp to MIDI range
     Max.outlet(HANDLER_DEBUG, pbValue);
-    //Max.post("pitch bend: " + pbValue);
+    Max.post("pitch bend: " + pbValue);
     return pbValue;
 }
 
 function interpolatePitchArray(arr, index) {
+    // Shift so that n + 0.5 lands exactly on arr[n].
+    index -= 0.5;
+
     if (index <= 0)
         return arr[0].pitch;
 
     if (index >= arr.length - 1)
         return arr[arr.length - 1].pitch;
-
-    // Shift so that n + 0.5 lands exactly on arr[n].
-    index -= 0.5;
 
     const i = Math.floor(index);
     const t = index - i;
@@ -523,7 +541,7 @@ function handleAdjacentScaleChange(newScaleName) {
 
 function updatePitchMap() {
     if (state.mode === "regular") {
-        state.pitchMap = Utils.getPitchMapRegular(state.currentScale, state.gridWidth, state.rowOffset, state.startOctave);
+        state.pitchMap = Utils.getPitchMapRegular(state.currentScale, state.gridWidth, state.rowOffset, state.startOctave, state.bottomRowActive);
     } else if (state.mode === "alternating") {
         state.pitchMap = Utils.getPitchMapAlternating(state.currentScale, state.gridWidth, state.rowOffset, state.startOctave);
     }
@@ -591,12 +609,11 @@ function displayNotes()
     // CC 22: Color value (0-11)
 
     function displayNotesRegular(rootPitchClass, scaleColor, offColor) {
-        Max.post("root class: " + rootPitchClass);
         for (var row = 0; row < 8; row++) {
             for (var col = 0; col < state.gridWidth; col++) {
                 var mapEntry = state.pitchMap[row][col];
                 var color = offColor;
-                if (row === 0) {
+                if (state.bottomRowActive && row === 0) {
                     // Bottom row, color using the scale color
                     color = Data.scaleClassColors[Data.scales[mapEntry.scale].scale_class];
                 } else {
