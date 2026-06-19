@@ -388,7 +388,6 @@ function handleNoteOnOff(row, column, velocity) {
     let note = state.pitchMap[row][actualColumn].pitch;
     //Max.post("Note " + (velocity > 0 ? "On: " : "Off: ") + note + "\n");
     if (voice != null) {
-        Max.post("channel: " + voice.channel);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel); // Open MPE gate
         Max.outlet(HANDLER_MIDI_NOTE, note, velocity); // Send note message
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0); // Close MPE gate
