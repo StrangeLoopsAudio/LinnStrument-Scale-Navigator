@@ -13,6 +13,7 @@ const HANDLER_MIDI_PITCH_BEND = "midipitchbend";
 const HANDLER_MIDI_AFTERTOUCH = "midiaftertouch";
 const HANDLER_MIDI_CHANNEL = "midichannel"; // Used for configuration messages to the LinnStrument
 const HANDLER_MPE_CHANNEL_GATE = "mpechannelgate"; // Used for note messages, needs to be reset to 0 to close gate after sending note messages
+const HANDLER_SCALE = "scale";
 const HANDLER_SCALE_ROOT = "scaleroot";
 const HANDLER_SCALE_CLASS = "scaleclass";
 const HANDLER_ENABLE = "enable";
@@ -20,6 +21,7 @@ const HANDLER_ENABLE_X = "enableX";
 const HANDLER_QUANTIZE_X = "quantize";
 const HANDLER_QUANTIZE_X_HOLD = "quantizeHold";
 const HANDLER_ENABLE_Y = "enableY";
+const HANDLER_CC_Y = "ccY";
 const HANDLER_ENABLE_Z = "enableZ";
 const HANDLER_GRID_WIDTH = "gridWidth";
 const HANDLER_ROW_OFFSET = "rowOffset";
@@ -83,10 +85,10 @@ var state = {
     gridWidth: 16,
     rowOffset: 4,
     startOctave: 1,
-    pbRangeOctaves: 2, // octaves
-    yCC: 1, // MIDI CC used for Y data
+    pbRangeOctaves: 2.0, // octaves
+    ccY: 74, // MIDI CC used for Y data
     mode: "regular", // or "alternating"
-    bottomRowActive: true,
+    bottomRowActive: false,
     currentScale: "c_diatonic",
     pitchMap: [],
     voices: new Map(), // Map of MPE channel to Voice object
@@ -137,6 +139,10 @@ Max.addHandler(HANDLER_ENABLE_Y, (v) => {
         Max.outlet(HANDLER_MIDI_CHANNEL, row + 1); // Send the row number as the value to specify which row is used for X-axis sliding when enabled, send 0 to disable
         Max.outlet(HANDLER_MIDI_CC, 11, state.isYEnabled); // Send the row number as the value to specify which row is used for X-axis sliding when enabled, send 0 to disable
     }
+});
+
+Max.addHandler(HANDLER_CC_Y, (v) => {
+    state.ccY = v;
 });
 
 Max.addHandler(HANDLER_ENABLE_Z, (v) => {
@@ -198,6 +204,10 @@ Max.addHandler(HANDLER_BOTTOM_ROW, (v) => {
     }
 });
 
+Max.addHandler(HANDLER_SCALE, (v) => {
+    handleAdjacentScaleChange(v);
+});
+
 Max.addHandler(HANDLER_SCALE_ROOT, (v) => {
     // Translate note name (e.g, C, A#) to scale name equivalent (e.g., c, as) and update currentScale while keeping the same scale class if possible
     var noteName = v.toLowerCase();
@@ -239,6 +249,7 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
     }
     //Max.post("Note event - row: " + row + ", column: " + column +  ", velocity: " + velocity + "\n");
     if (state.messageState == MessageState.NORMAL) {
+        if (row >= 8 || column >= state.gridWidth) return;
         let mappedPitchEntry = state.pitchMap[row][column];
 
         // Note on/off behavior
@@ -254,7 +265,7 @@ Max.addHandler(HANDLER_MIDI_NOTE, (...args) => {
             voice.currentColumn = column;
             let centerX = (voice.sourceColumn + 0.5) / state.gridWidth;
             voice.initialX = centerX; // Reset center strike to actual center of source column
-            Max.post("Slide on channel: " + voice.channel + " to column: " + column + " on row: " + row + "\n");
+            //Max.post("Slide on channel: " + voice.channel + " to column: " + column + " on row: " + row + "\n");
             state.messageState = MessageState.EXPECT_NOTE_OFF;
         }
     } else if (state.messageState == MessageState.EXPECT_NOTE_OFF) {
@@ -274,7 +285,7 @@ Max.addHandler(HANDLER_MIDI_POLY_PRESSURE, (note, value, channel) => {
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel);
         Max.outlet(HANDLER_MIDI_AFTERTOUCH, voice.z);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
-         Max.post("Updated Z position for channel: " + voice.channel + " -> " + value + "\n");
+        //Max.post("Updated Z position for channel: " + voice.channel + " -> " + value + "\n");
     } else {
         Max.post("No active voice found for row: " + row + " and column: " + column + "\n");
     }
@@ -340,9 +351,9 @@ Max.addHandler(HANDLER_MIDI_CC, (ccNum, ccValue, channel) => {
         voice.y = ccValue;
         // Send Y value
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, voice.channel);
-        Max.outlet(HANDLER_MIDI_CC, 74, voice.y);
+        Max.outlet(HANDLER_MIDI_CC, state.ccY, voice.y);
         Max.outlet(HANDLER_MPE_CHANNEL_GATE, 0);
-        Max.post("Updated Y position for channel: " + voice.channel + " -> " + voice.y + "\n");
+       //Max.post("Updated Y position for channel: " + voice.channel + " -> " + voice.y + "\n");
     }
     // Z data comes in through poly pressure, not here
 });
@@ -501,7 +512,7 @@ function calculatePitchBend(curX, sourceX, row) {
     let pbValue = Math.round((dxSemitones / (state.pbRangeOctaves * 12)) * 64) + 64;
     pbValue = Math.min(127, Math.max(0, pbValue)); // Clamp to MIDI range
     Max.outlet(HANDLER_DEBUG, pbValue);
-    Max.post("pitch bend: " + pbValue);
+    //Max.post("pitch bend: " + pbValue);
     return pbValue;
 }
 
