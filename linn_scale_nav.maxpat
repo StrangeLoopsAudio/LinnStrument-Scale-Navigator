@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 131.0, 165.0, 993.0, 707.0 ],
+		"rect" : [ 795.0, 107.0, 633.0, 807.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -95,7 +95,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "int" ],
 					"patching_rect" : [ 240.0, 93.0, 29.5, 22.0 ],
-					"text" : "1"
+					"text" : "-1"
 				}
 
 			}
@@ -161,7 +161,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 240.0, 126.0, 50.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 423.56013435125351, 118.257982507348061, 61.237679183483124, 22.0 ]
+					"presentation_rect" : [ 426.760286942124367, 118.257982507348061, 58.011055290699005, 22.0 ]
 				}
 
 			}
@@ -177,7 +177,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 144.0, 126.0, 50.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 423.56013435125351, 94.371343329548836, 61.237679183483124, 22.0 ]
+					"presentation_rect" : [ 426.760286942124367, 94.371343329548836, 58.011055290699005, 22.0 ]
 				}
 
 			}
@@ -193,7 +193,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 351.5, 109.0, 73.0, 40.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 421.535842895507812, 141.591821700334549, 66.249998420476913, 27.695174500346184 ],
+					"presentation_rect" : [ 425.379071339964867, 141.591821700334549, 62.455120459198952, 27.624312043190002 ],
 					"tabcolor" : [ 0.65098, 0.666667, 0.662745, 1.0 ],
 					"tabs" : [ "2", "3", "12", "24" ]
 				}
@@ -241,7 +241,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 557.0, 85.0, 31.0, 38.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 129.251699447631836, 119.310311391949654, 69.0, 22.0 ],
+					"presentation_rect" : [ 129.251699447631836, 119.310311391949654, 65.037186920642853, 22.0 ],
 					"saved_attribute_attributes" : 					{
 						"textcolor" : 						{
 							"expression" : ""
@@ -250,7 +250,7 @@
 					}
 ,
 					"text" : "Y CC#",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -266,7 +266,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 554.0, 126.0, 33.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 188.435372352600098, 119.310311391949654, 35.0, 22.0 ]
+					"presentation_rect" : [ 195.238093376159668, 120.129463016986847, 35.0, 22.0 ]
 				}
 
 			}
@@ -293,8 +293,9 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 1112.0, 259.0, 82.0, 38.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 329.535842895507812, 215.364416211843491, 97.0, 22.0 ],
-					"text" : "Refresh Rooms"
+					"presentation_rect" : [ 322.673493087291718, 214.364416211843491, 96.862349808216095, 22.0 ],
+					"text" : "Refresh Rooms",
+					"textjustification" : 2
 				}
 
 			}
@@ -359,7 +360,8 @@
 					"patching_rect" : [ 1265.5, 550.0, 85.0, 22.0 ],
 					"presentation" : 1,
 					"presentation_rect" : [ 260.16676539182663, 187.437429293990135, 84.0, 22.0 ],
-					"text" : "Room Name"
+					"text" : "Room Name",
+					"textjustification" : 2
 				}
 
 			}
@@ -660,7 +662,7 @@
 					}
 ,
 					"text" : "Quantize Hold",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -722,7 +724,7 @@
 					}
 ,
 					"text" : "Quantize",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -932,7 +934,7 @@
 					}
 ,
 					"text" : "Bend Range",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1093,7 +1095,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 594.0, 90.0, 56.0, 54.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 228.418438017368317, 95.181059911847115, 88.0, 22.0 ],
+					"presentation_rect" : [ 228.418438017368317, 95.181059911847115, 85.082881093025208, 22.0 ],
 					"saved_attribute_attributes" : 					{
 						"textcolor" : 						{
 							"expression" : ""
@@ -1102,7 +1104,7 @@
 					}
 ,
 					"text" : "Z Enable (AT)",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1116,7 +1118,7 @@
 					"parameter_enable" : 1,
 					"patching_rect" : [ 518.0, 120.0, 32.0, 31.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 195.238093376159668, 96.181059911847115, 21.0, 20.0 ],
+					"presentation_rect" : [ 195.238093376159668, 96.500787809491158, 21.0, 20.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
 							"parameter_enum" : [ "off", "on" ],
@@ -1144,7 +1146,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 518.0, 90.0, 29.0, 54.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 129.251699447631836, 95.500787809491158, 69.0, 22.0 ],
+					"presentation_rect" : [ 129.251699447631836, 95.500787809491158, 65.037186920642853, 22.0 ],
 					"saved_attribute_attributes" : 					{
 						"textcolor" : 						{
 							"expression" : ""
@@ -1153,7 +1155,7 @@
 					}
 ,
 					"text" : "Y Enable",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1204,7 +1206,7 @@
 					}
 ,
 					"text" : "X Enable",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1251,7 +1253,7 @@
 					}
 ,
 					"text" : "Scale Class",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1274,7 +1276,7 @@
 					}
 ,
 					"text" : "Scale Root",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1364,7 +1366,7 @@
 					}
 ,
 					"text" : "Start Octave",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1452,7 +1454,7 @@
 , 			{
 				"box" : 				{
 					"id" : "obj-6",
-					"items" : [ "AU DLS Synth 1", ",", "from Max 1", ",", "from Max 2" ],
+					"items" : [ "AU DLS Synth 1", ",", "LinnStrument MIDI", ",", "from Max 1", ",", "from Max 2" ],
 					"maxclass" : "umenu",
 					"numinlets" : 1,
 					"numoutlets" : 3,
@@ -1519,7 +1521,7 @@
 
 					}
 ,
-					"text" : "Linnstrument Device",
+					"text" : "LinnStrument Device",
 					"textjustification" : 1
 				}
 
@@ -1593,7 +1595,7 @@
 					}
 ,
 					"text" : "Row Offset ",
-					"textjustification" : 1
+					"textjustification" : 2
 				}
 
 			}
@@ -1646,7 +1648,7 @@
 , 			{
 				"box" : 				{
 					"id" : "obj-8",
-					"items" : [ "AU DLS Synth 1", ",", "from Max 1", ",", "from Max 2" ],
+					"items" : [ "AU DLS Synth 1", ",", "LinnStrument MIDI", ",", "from Max 1", ",", "from Max 2" ],
 					"maxclass" : "umenu",
 					"numinlets" : 1,
 					"numoutlets" : 3,
